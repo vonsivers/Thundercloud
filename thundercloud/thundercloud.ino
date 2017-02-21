@@ -10,7 +10,7 @@ This paragraph must be included in any redistribution.
 #include "FastLED.h"
 
 // How many leds in your strip?
-#define NUM_LEDS 11
+#define NUM_LEDS 25
 #define DATA_PIN 6
 
 // switch serial output on/off for debugging
@@ -19,24 +19,22 @@ bool verbose = true;
 
 // Mode enumeration - if you want to add additional party or colour modes, add them here; you'll need to map some IR codes to them later; 
 // and add the modes into the main switch loop
-enum Mode { CLOUD,THUNDER,ACID,OFF,SUNNY,RAINY,FADE,THERMO,WARM,SUNRISE,SUNDOWN};
+enum Mode { CLOUD,THUNDER,ACID,OFF,SUNNY,RAINY,FADE,WARM,SUNRISE,SUNDOWN};
 Mode mode = OFF;  
 Mode lastMode = OFF;
 
 // Mic settings, shouldn't need to adjust these. 
 #define MIC_PIN   0  // Microphone is attached to this analog pin
-int DC_OFFSET = 0;  // DC offset in mic signal 
-int NOISE = 5; // Threshold for triggering on mic signal
-#define NOISE_UP  20  // Upper limit for triggering on mic signal
+unsigned DC_OFFSET = 0;  // DC offset in mic signal 
+int NOISE = 800; // Threshold for triggering on mic signal
+#define NOISE_UP  2000  // Upper limit for triggering on mic signal
+#define NOISE_STEP 10
 #define SAMPLES   5  // Length of buffer for dynamic level adjustment
-#define TMP35_PIN 1 // TMP365 is attached to this pin
-byte
-  volCount  = 0;      // Frame counter for storing past volume data
-int
-  vol[SAMPLES];       // Collection of prior volume samples
+
+byte volCount  = 0;      // Frame counter for storing past volume data
+int vol[SAMPLES];       // Collection of prior volume samples
 unsigned long sampletime[SAMPLES]; // sample time (for debugging)
 unsigned long clocktime; // sample time (for debugging)
-int      n, total = 0; // current/total sample reading
 float average = 0;
 
 int Tavg;     // temperature values for TMP35
@@ -57,7 +55,7 @@ CRGB leds[NUM_LEDS];
 
 void setup() { 
   // this line sets the LED strip type - refer fastLED documeantion for more details https://github.com/FastLED/FastLED
-  FastLED.addLeds<WS2811, DATA_PIN, RGB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2811, DATA_PIN, BRG>(leds, NUM_LEDS);
   // starts the audio samples array at volume 15. 
   memset(vol, 15, sizeof(vol));
   Serial.begin(115200);
@@ -80,31 +78,29 @@ void receiveEvent(int bytes) {
       }
       lastMode = mode;
       switch(received){
-        case 0x1F:
+        case 0x07:
           resetBH(); mode = OFF; break;
-        case 0x2F:
+        case 0x4D:
           resetBH(); mode = THUNDER; break;
-        case 0x5F:
+        case 0x97:
           resetBH(); record_offset(); mode = CLOUD; break;
-        case 0xDF:
+        case 0xFF:
           resetBH(); mode = ACID; break;
-        case 0x9F:
+        case 0xA7:
           resetBH(); mode = FADE; break;
-        case 0x6F:
+        case 0x67:
           resetBH(); mode = SUNNY; break;
-        case 0xEF:
+        case 0x77:
           resetBH(); mode = RAINY; break;
-        case 0xAF:
-          resetBH(); mode = THERMO; break;
-        case 0x4F:
+        case 0x57:
           resetBH(); mode = WARM; break;
-        case 0xCF:
+        case 0x17:
           resetBH(); mode = SUNRISE; break;
-        case 0x8F:
-          resetBH(); mode = SUNDOWN; break;
-        case 0xF7:
-          VolDown(); break;
         case 0xB7:
+          resetBH(); mode = SUNDOWN; break;
+        case 0x47:
+          VolDown(); break;
+        case 0x6F:
           VolUp(); break;
         
       }
@@ -123,7 +119,6 @@ void loop() {
     case SUNNY: sunny();break;
     case RAINY: rainy();break;
     case FADE: colour_fade();break;
-    case THERMO: thermometer();break;
     case WARM: setwarm();break;
     case SUNRISE: sunrise(); break;
     case SUNDOWN: sundown(); break;
@@ -132,21 +127,21 @@ void loop() {
   
 }
 
-void VolUp() {
-  if(NOISE-1>=0) {
-    NOISE--;
+void VolDown() {
+  if(NOISE-NOISE_STEP>=0) {
+    NOISE -= NOISE_STEP;
      if(verbose) {
-      Serial.print("Mic Threshold: ");
+      Serial.print("##### Mic Threshold: ");
       Serial.println(NOISE);
     }
   }
 }
 
-void VolDown() {
-  if(NOISE+1<=NOISE_UP) {
-    NOISE++;
+void VolUp() {
+  if(NOISE+NOISE_STEP<=NOISE_UP) {
+    NOISE += NOISE_STEP;
     if(verbose) {
-      Serial.print("Mic Threshold: ");
+      Serial.print("#### Mic Threshold: ");
       Serial.println(NOISE);
     }
   }
@@ -226,9 +221,10 @@ void record_offset(){
    if(verbose) {
       Serial.println("### Recording Mic Offset ###");
     }
-  n = 0;
+  unsigned long n = 0;
   for(int i=0; i<100; ++i) {
     n += analogRead(MIC_PIN);
+    delay(10);
   }
   DC_OFFSET = n/100;
   if(verbose) {
@@ -246,14 +242,16 @@ void detect_thunder() {
     colour_shade(150,208,100);
     lastMode = mode;
   }
-  n   = analogRead(MIC_PIN);                        // Raw reading from mic 
+  int n = analogRead(MIC_PIN);  // Raw reading from mic 
   clocktime = micros();
-  n   = (n - DC_OFFSET < 0) ? 0 : n - DC_OFFSET; // Center on zero
-  vol[volCount] = n;                      // Save sample for dynamic leveling
+  vol[volCount] = n - DC_OFFSET;
+  if(vol[volCount]<0) vol[volCount]=0;
+  //vol[volCount] = (n - DC_OFFSET < 0) ? 0 : (n - DC_OFFSET); // Center on zero 
+                  
   sampletime[volCount] = clocktime;
   if(++volCount >= SAMPLES) volCount = 0; // Advance/rollover sample counter
  
-  total = 0;
+  unsigned long total = 0;
   for(int i=0; i<SAMPLES; i++) {
     total += vol[i];
   }
@@ -274,8 +272,8 @@ void detect_thunder() {
   Serial.print("total ");
   Serial.println(total);
   }
- */
-
+ 
+*/
   
   
   //average = (total/SAMPLES);
@@ -389,31 +387,6 @@ void constant_lightning(){
   delay(random(100,1000)); 
 }
 
-// read temperature and convert to LED colour
-void thermometer() {
-if(lastMode != mode){
-      if(verbose) {
-        Serial.println("### Thermometer Mode ###");
-      }
-      lastMode = mode;
-    }
-    // average over 10 values
-    Tavg = 0;
-    for(int i=0;i<10;++i) {
-      Tavg += map(analogRead(TMP35_PIN), 15, 65, 128, 255);
-      delay(100);
-    }
-    Tavg = Tavg/10;
-     if(verbose) {
-        Serial.print("TMP35 voltage read ");
-        Serial.println(Tavg);
-      }
-    for (int i=0;i<NUM_LEDS;i++){
-      leds[i] = CHSV( Tavg, 255, 255);
-    }
-    FastLED.show(); 
-  
-}
 
 void switchoff() {
     if(lastMode != mode){

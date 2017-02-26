@@ -103,9 +103,9 @@ void receiveEvent(int bytes) {
         case 0x8F:
           resetBH(); mode = SUNDOWN; break;
         case 0xF7:
-          VolDown(); break;
+          ThresDown(); break;
         case 0xB7:
-          VolUp(); break;
+          ThresUp(); break;
         
       }
    }
@@ -132,7 +132,7 @@ void loop() {
   
 }
 
-void VolUp() {
+void ThresDown() {
   if(NOISE-1>=0) {
     NOISE--;
      if(verbose) {
@@ -142,7 +142,7 @@ void VolUp() {
   }
 }
 
-void VolDown() {
+void ThresUp() {
   if(NOISE+1<=NOISE_UP) {
     NOISE++;
     if(verbose) {
@@ -226,11 +226,12 @@ void record_offset(){
    if(verbose) {
       Serial.println("### Recording Mic Offset ###");
     }
-  n = 0;
+  unsigned long reading = 0;
   for(int i=0; i<100; ++i) {
-    n += analogRead(MIC_PIN);
+    reading += analogRead(MIC_PIN);
+    delay(7);
   }
-  DC_OFFSET = n/100;
+  DC_OFFSET = reading/100;
   if(verbose) {
     Serial.print("Offset: ");
     Serial.println(DC_OFFSET);
@@ -274,8 +275,8 @@ void detect_thunder() {
   Serial.print("total ");
   Serial.println(total);
   }
- */
-
+ 
+*/
   
   
   //average = (total/SAMPLES);
